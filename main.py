@@ -1,0 +1,127 @@
+import os
+import tempfile
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse
+from typing import Dict, Any
+import uvicorn
+
+# Import our custom modules
+from stt import transcribe_audio
+from llm_utils import refine_transcript, generate_quiz
+from video_utils import extract_audio_from_video
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Quiz Generation Service",
+    description="A microservice that generates multiple-choice quizzes from video input",
+    version="1.0.0"
+)
+
+
+@app.post("/generate-quiz", response_model=Dict[str, Any])
+async def generate_quiz_endpoint(video: UploadFile = File(...)) -> JSONResponse:
+    """
+    Generate a multiple-choice quiz from a video file.
+    
+    Args:
+        video (UploadFile): The input video file (MP4 format)
+        
+    Returns:
+        JSONResponse: Quiz data in JSON format with questions and answers
+        
+    Raises:
+        HTTPException: If any step in the pipeline fails
+    """
+    temp_video_path = None
+    temp_audio_path = None
+    
+    try:
+        # Validate file type
+        if not video.content_type or not video.content_type.startswith('video/'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Please upload a video file."
+            )
+        
+        # Save uploaded video to temporary file
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+            temp_video_path = temp_video.name
+            content = await video.read()
+            temp_video.write(content)
+        
+        # Step 1: Extract audio from video
+        temp_audio_path = extract_audio_from_video(temp_video_path)
+        
+        # Step 2: Speech-to-Text
+        raw_transcript = transcribe_audio(temp_audio_path)
+        
+        if not raw_transcript or raw_transcript.strip() == "":
+            raise HTTPException(
+                status_code=422,
+                detail="No speech detected in the video. Please ensure the video contains clear audio."
+            )
+        
+        # Step 3: Refine transcript using LLM
+        refined_transcript = refine_transcript(raw_transcript)
+        
+        # Step 4: Generate multiple-choice questions
+        quiz_data = generate_quiz(refined_transcript)
+        
+        return JSONResponse(content=quiz_data)
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Handle all other exceptions
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+    finally:
+        # Clean up temporary files
+        if temp_video_path and os.path.exists(temp_video_path):
+            try:
+                os.unlink(temp_video_path)
+            except Exception:
+                pass
+        
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.unlink(temp_audio_path)
+            except Exception:
+                pass
+
+
+@app.get("/health")
+async def health_check() -> Dict[str, str]:
+    """
+    Health check endpoint.
+    
+    Returns:
+        Dict[str, str]: Status message
+    """
+    return {"status": "healthy", "service": "Quiz Generation Service"}
+
+
+@app.get("/")
+async def root() -> Dict[str, Any]:
+    """
+    Root endpoint with service information.
+    
+    Returns:
+        Dict[str, Any]: Welcome message and service description
+    """
+    return {
+        "message": "Welcome to Quiz Generation Service",
+        "description": "Upload a video file to /generate-quiz to generate multiple-choice questions",
+        "endpoints": {
+            "POST /generate-quiz": "Generate quiz from video file",
+            "GET /health": "Health check",
+            "GET /docs": "API documentation"
+        }
+    }
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
