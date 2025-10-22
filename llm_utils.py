@@ -9,7 +9,7 @@ if GEMINI_API_KEY:
     os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
 else:
     # Fallback for local development (remove this in production)
-    # os.environ["GEMINI_API_KEY"] = "AIzaSyDYlNgoFytV1zFaR2rHlsSjXqJdB27hN7s"
+    os.environ["GEMINI_API_KEY"] = ""
 
 
 def refine_transcript(transcript: str) -> str:
