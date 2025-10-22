@@ -1,7 +1,8 @@
 import os
 import tempfile
+import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
@@ -19,17 +20,23 @@ except Exception as e:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan event to check system status"""
+    """Lifespan event to check system status and preload models"""
     print("🚀 Starting Quiz Generation Service...")
     print(f"📊 Python version: {os.sys.version}")
     print(f"🔑 Gemini API configured: {bool(os.getenv('GEMINI_API_KEY'))}")
     print(f"🌐 Port: {os.getenv('PORT', '8000')}")
-    try:
-        # Test basic imports
-        from transformers import pipeline
-        print("✅ Transformers library loaded successfully")
-    except Exception as e:
-        print(f"❌ Error loading transformers: {e}")
+    
+    # Pre-load models if modules are available
+    if MODULES_LOADED:
+        try:
+            print("🔄 Pre-loading models...")
+            # Pre-load speech-to-text model
+            from stt import get_transcriber
+            get_transcriber()
+            print("✅ Models pre-loaded successfully!")
+        except Exception as e:
+            print(f"❌ Error pre-loading models: {e}")
+    
     print("✅ Service startup complete!")
     yield
     print("🛑 Shutting down Quiz Generation Service...")
@@ -87,11 +94,14 @@ async def generate_quiz_endpoint(video: UploadFile = File(...)) -> JSONResponse:
             content = await video.read()
             temp_video.write(content)
 
-        # Step 1: Extract audio from video
-        temp_audio_path = extract_audio_from_video(temp_video_path)
+        # Run heavy operations in background threads to avoid blocking
+        loop = asyncio.get_event_loop()
+        
+        # Step 1: Extract audio from video (async)
+        temp_audio_path = await loop.run_in_executor(None, extract_audio_from_video, temp_video_path)
 
-        # Step 2: Speech-to-Text
-        raw_transcript = transcribe_audio(temp_audio_path)
+        # Step 2: Speech-to-Text (async)
+        raw_transcript = await loop.run_in_executor(None, transcribe_audio, temp_audio_path)
 
         if not raw_transcript or raw_transcript.strip() == "":
             raise HTTPException(
@@ -99,11 +109,11 @@ async def generate_quiz_endpoint(video: UploadFile = File(...)) -> JSONResponse:
                 detail="No speech detected in the video. Please ensure the video contains clear audio.",
             )
 
-        # Step 3: Refine transcript using LLM
-        refined_transcript = refine_transcript(raw_transcript)
+        # Step 3: Refine transcript using LLM (async)
+        refined_transcript = await loop.run_in_executor(None, refine_transcript, raw_transcript)
 
-        # Step 4: Generate multiple-choice questions
-        quiz_data = generate_quiz(refined_transcript)
+        # Step 4: Generate multiple-choice questions (async)
+        quiz_data = await loop.run_in_executor(None, generate_quiz, refined_transcript)
 
         return JSONResponse(content=quiz_data)
 
@@ -164,8 +174,9 @@ async def evaluate_speech_endpoint(
             content = await audio.read()
             temp_audio.write(content)
 
-        # Call the speech evaluation function from llm_utils
-        evaluation_result = evaluate_speech(exercise_definition, temp_audio_path)
+        # Call the speech evaluation function from llm_utils (async)
+        loop = asyncio.get_event_loop()
+        evaluation_result = await loop.run_in_executor(None, evaluate_speech, exercise_definition, temp_audio_path)
 
         return JSONResponse(content=evaluation_result)
 
@@ -210,7 +221,50 @@ async def test_endpoint() -> Dict[str, str]:
     """
     Simple test endpoint to verify API is working.
     """
-    return {"message": "API is working!", "timestamp": str(os.time.time() if hasattr(os, 'time') else 'unknown')}
+    import time
+    return {
+        "message": "API is working!", 
+        "timestamp": str(time.time()),
+        "concurrent_requests": "supported"
+    }
+
+@app.get("/status")
+async def status_endpoint() -> Dict[str, Any]:
+    """
+    Status endpoint showing system performance info.
+    """
+    import psutil
+    import time
+    
+    try:
+        cpu_percent = psutil.cpu_percent()
+        memory = psutil.virtual_memory()
+        
+        return {
+            "status": "online",
+            "timestamp": time.time(),
+            "system": {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory.percent,
+                "memory_available_mb": memory.available // (1024*1024)
+            },
+            "features": {
+                "async_processing": True,
+                "model_caching": True,
+                "concurrent_requests": True
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "online",
+            "timestamp": time.time(),
+            "error": f"Could not get system info: {e}",
+            "features": {
+                "async_processing": True,
+                "model_caching": True,
+                "concurrent_requests": True
+            }
+        }
 
 
 @app.get("/")

@@ -30,5 +30,9 @@ COPY . .
 # Expose port (Railway will override this)
 EXPOSE 8000
 
-# Run the application using Python directly (it handles PORT env var)
-CMD ["python", "main.py"]
+# Copy startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Run the application with the startup script
+CMD ["./start.sh"]
