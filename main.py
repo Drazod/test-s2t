@@ -27,6 +27,21 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to check system status"""
+    print("🚀 Starting Quiz Generation Service...")
+    print(f"📊 Python version: {os.sys.version}")
+    print(f"🔑 Gemini API configured: {bool(os.getenv('GEMINI_API_KEY'))}")
+    print(f"🌐 Port: {os.getenv('PORT', '8000')}")
+    try:
+        # Test basic imports
+        from transformers import pipeline
+        print("✅ Transformers library loaded successfully")
+    except Exception as e:
+        print(f"❌ Error loading transformers: {e}")
+    print("✅ Service startup complete!")
+
 
 @app.post("/generate-quiz", response_model=Dict[str, Any])
 async def generate_quiz_endpoint(video: UploadFile = File(...)) -> JSONResponse:
@@ -159,14 +174,28 @@ async def evaluate_speech_endpoint(
 
 
 @app.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check() -> Dict[str, Any]:
     """
-    Health check endpoint.
+    Health check endpoint with diagnostics.
 
     Returns:
-        Dict[str, str]: Status message
+        Dict[str, Any]: Status message and system info
     """
-    return {"status": "healthy", "service": "Quiz Generation Service"}
+    import sys
+    return {
+        "status": "healthy", 
+        "service": "Quiz Generation Service",
+        "python_version": sys.version,
+        "gemini_api_configured": bool(os.getenv("GEMINI_API_KEY")),
+        "port": os.getenv("PORT", "8000")
+    }
+
+@app.get("/test")
+async def test_endpoint() -> Dict[str, str]:
+    """
+    Simple test endpoint to verify API is working.
+    """
+    return {"message": "API is working!", "timestamp": str(os.time.time() if hasattr(os, 'time') else 'unknown')}
 
 
 @app.get("/")

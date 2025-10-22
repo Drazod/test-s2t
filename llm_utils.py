@@ -8,7 +8,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
 else:
-    # Fallback for local development (remove this in production)
+    # For Railway deployment, this should be set as an environment variable
+    print("WARNING: GEMINI_API_KEY not set! Please set it in Railway environment variables.")
+    # Set empty key for now to prevent crashes
     os.environ["GEMINI_API_KEY"] = ""
 
 
