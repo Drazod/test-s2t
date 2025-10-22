@@ -7,6 +7,10 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any
 import uvicorn
+from dotenv import load_dotenv
+
+# Load environment variables from .env file first
+load_dotenv()
 
 # Import our custom modules
 try:

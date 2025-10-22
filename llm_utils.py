@@ -2,11 +2,16 @@ import os
 import json
 from typing import Dict, Any
 from litellm import completion
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Get API key from environment variable
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+    print("✅ Gemini API key loaded successfully!")
 else:
     # For Railway deployment, this should be set as an environment variable
     print("WARNING: GEMINI_API_KEY not set! Please set it in Railway environment variables.")
