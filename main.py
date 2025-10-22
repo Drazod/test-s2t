@@ -1,5 +1,6 @@
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,29 +8,18 @@ from typing import Dict, Any
 import uvicorn
 
 # Import our custom modules
-from stt import transcribe_audio
-from llm_utils import refine_transcript, generate_quiz, evaluate_speech
-from video_utils import extract_audio_from_video
+try:
+    from stt import transcribe_audio
+    from llm_utils import refine_transcript, generate_quiz, evaluate_speech
+    from video_utils import extract_audio_from_video
+    MODULES_LOADED = True
+except Exception as e:
+    print(f"WARNING: Some modules failed to load: {e}")
+    MODULES_LOADED = False
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Quiz Generation Service",
-    description="A microservice that generates multiple-choice quizzes from video input",
-    version="1.0.0",
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup event to check system status"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event to check system status"""
     print("🚀 Starting Quiz Generation Service...")
     print(f"📊 Python version: {os.sys.version}")
     print(f"🔑 Gemini API configured: {bool(os.getenv('GEMINI_API_KEY'))}")
@@ -41,6 +31,25 @@ async def startup_event():
     except Exception as e:
         print(f"❌ Error loading transformers: {e}")
     print("✅ Service startup complete!")
+    yield
+    print("🛑 Shutting down Quiz Generation Service...")
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Quiz Generation Service",
+    description="A microservice that generates multiple-choice quizzes from video input",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 
 @app.post("/generate-quiz", response_model=Dict[str, Any])
@@ -57,6 +66,11 @@ async def generate_quiz_endpoint(video: UploadFile = File(...)) -> JSONResponse:
     Raises:
         HTTPException: If any step in the pipeline fails
     """
+    if not MODULES_LOADED:
+        raise HTTPException(
+            status_code=503, 
+            detail="Service modules not fully loaded. Please check deployment."
+        )
     temp_video_path = None
     temp_audio_path = None
 
@@ -183,8 +197,9 @@ async def health_check() -> Dict[str, Any]:
     """
     import sys
     return {
-        "status": "healthy", 
+        "status": "healthy" if MODULES_LOADED else "degraded", 
         "service": "Quiz Generation Service",
+        "modules_loaded": MODULES_LOADED,
         "python_version": sys.version,
         "gemini_api_configured": bool(os.getenv("GEMINI_API_KEY")),
         "port": os.getenv("PORT", "8000")
