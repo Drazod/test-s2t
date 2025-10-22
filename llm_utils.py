@@ -3,8 +3,13 @@ import json
 from typing import Dict, Any
 from litellm import completion
 
-
-os.environ["GEMINI_API_KEY"] = "your_api_key_here"  # Replace with your actual API key
+# Get API key from environment variable
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+else:
+    # Fallback for local development (remove this in production)
+    os.environ["GEMINI_API_KEY"] = "AIzaSyDYlNgoFytV1zFaR2rHlsSjXqJdB27hN7s"
 
 
 def refine_transcript(transcript: str) -> str:
@@ -59,25 +64,19 @@ def generate_quiz(transcript: str) -> Dict[str, Any]:
     sys_prompt = """
 **Mục tiêu:** Sinh ra **10 câu hỏi trắc nghiệm** (có 4 lựa chọn, bao gồm 1 đáp án đúng) dựa trên nội dung của đoạn văn bản/transcript tiếng Việt được cung cấp.
 
-**Yêu cầu Định dạng Đầu ra:** Phải là định dạng JSON hoàn chỉnh, bao gồm cấu trúc câu hỏi, các lựa chọn trả lời và chỉ định đáp án đúng.
+**QUAN TRỌNG:** 
+- Chỉ trả về JSON hợp lệ, không có markdown, không có text giải thích
+- Đảm bảo tất cả dấu ngoặc kép, dấu phay được đặt đúng
+- Không sử dụng dấu ngoặc kép trong nội dung câu hỏi mà không escape
+- Mỗi câu hỏi phải có đúng 4 options và chỉ 1 isCorrect: true
 
-**Yêu cầu Cấu trúc Câu hỏi:**
-Các câu hỏi cần bao quát các khía cạnh sau:
-
-1.  **Ý chính** của đoạn văn.
-2.  **Chi tiết cụ thể** trong nội dung.
-3.  **Thông tin quan trọng** được đề cập.
-4.  **Phương thức/Cách thức** được mô tả.
-5.  **Lời khuyên/Bài học rút ra** (nếu có).
-
-**Định dạng JSON Bắt buộc:**
-
+**Định dạng JSON bắt buộc (copy chính xác):**
 {
-  "quizTitle": "Kiểm tra Nghe/Đọc Hiểu",
+  "quizTitle": "Kiểm tra Nghe Hiểu",
   "questions": [
     {
       "questionNumber": 1,
-      "question": "Câu hỏi trắc nghiệm...",
+      "question": "Câu hỏi trắc nghiệm về nội dung",
       "options": [
         {"text": "Lựa chọn A", "isCorrect": false},
         {"text": "Lựa chọn B", "isCorrect": true},
@@ -88,7 +87,7 @@ Các câu hỏi cần bao quát các khía cạnh sau:
   ]
 }
 
-Hãy trả về CHỈ JSON, không thêm bất kỳ text nào khác.
+Trả về CHỈ JSON, bắt đầu bằng { và kết thúc bằng }.
 """
 
     try:
@@ -101,19 +100,52 @@ Hãy trả về CHỈ JSON, không thêm bất kỳ text nào khác.
         )
 
         content = response.choices[0].message.content.strip()
+        
+        # DEBUG: Print the raw response
+        print("="*80)
+        print("DEBUG: Raw LLM Response:")
+        print(content)
+        print("="*80)
 
-        # Try to parse JSON, handle potential markdown formatting
+        # Clean up the response more thoroughly
+        # Remove markdown code blocks
         if content.startswith("```json"):
             content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+        
         if content.endswith("```"):
             content = content[:-3]
+        
+        # Remove any leading/trailing whitespace after cleanup
+        content = content.strip()
+        
+        # Try to find JSON content if wrapped in other text
+        json_start = content.find('{')
+        json_end = content.rfind('}') + 1
+        
+        if json_start != -1 and json_end != -1:
+            content = content[json_start:json_end]
+
+        # DEBUG: Print the cleaned content before parsing
+        print("DEBUG: Cleaned content before JSON parsing:")
+        print(content)
+        print("="*80)
 
         quiz_data = json.loads(content)
 
         return quiz_data
     except json.JSONDecodeError as e:
+        # Log the actual content that failed to parse for debugging
+        print("="*80)
+        print(f"DEBUG: JSON DECODE ERROR")
+        print(f"Error: {str(e)}")
+        print(f"Content that failed to parse:")
+        print(content)
+        print("="*80)
         raise Exception(f"Failed to parse quiz JSON: {str(e)}")
     except Exception as e:
+        print(f"DEBUG: Other error in generate_quiz: {str(e)}")
         raise Exception(f"Failed to generate quiz: {str(e)}")
 
 
